@@ -31,6 +31,8 @@
     "deployContainerRegistry":              { "value": "true" },
     "deployContainerEnv":                   { "value": "true" },
     "deployNsgs":                           { "value": "true" },
+    "deployAzureFirewall":                  { "value": "${DEPLOY_AZURE_FIREWALL=false}" },
+    "deployAcrTaskAgentPool":               { "value": "${DEPLOY_ACR_TASK_AGENT_POOL=false}" },
     "deployMcp":                            { "value": "true" },
     "deployGroundingWithBing":              { "value": "false" },
     "deployKeyVault":                       { "value": "true" },
