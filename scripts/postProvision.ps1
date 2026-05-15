@@ -199,4 +199,32 @@ if (-not $missing.Contains('APP_CONFIG_ENDPOINT')) {
 #     }
 # }
 
+#-------------------------------------------------------------------------------
+# Lock down App Configuration (disable public access after provisioning)
+# When TEMP_PUBLIC_APP_CONFIG was used, App Config was left public so ARM could
+# write key-values. Now that everything is configured, disable public access.
+#-------------------------------------------------------------------------------
+if ($env:NETWORK_ISOLATION -and $env:NETWORK_ISOLATION.ToLower() -eq 'true' `
+    -and $env:TEMP_PUBLIC_APP_CONFIG -and $env:TEMP_PUBLIC_APP_CONFIG.ToLower() -eq 'true') {
+
+    $appConfigName = $env:APP_CONFIG_NAME
+    if (-not $appConfigName -and $env:RESOURCE_TOKEN) {
+        $appConfigName = "appcs-$($env:RESOURCE_TOKEN)"
+    }
+    $rg = $env:AZURE_RESOURCE_GROUP
+
+    if ($appConfigName -and $rg) {
+        Write-Host "`n[INFO] Disabling public network access on App Configuration '$appConfigName'..." -ForegroundColor Cyan
+        az appconfig update --name $appConfigName --resource-group $rg `
+            --enable-public-network false 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] App Configuration public access disabled. Only private endpoint access remains." -ForegroundColor Green
+        } else {
+            Write-Host "[WARN] Failed to disable public access on App Configuration. Please do it manually." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[WARN] Cannot determine App Configuration name. Skipping public access lock-down." -ForegroundColor Yellow
+    }
+}
+
 Write-Host "`n[OK] postProvisioning completed."

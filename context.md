@@ -1,7 +1,7 @@
 # Project Context — GPT-RAG Custom Fork
 
 > **Purpose**: Rapid ramp-up document for any LLM or developer continuing work on this repository.  
-> **Last updated**: 2026-05-14
+> **Last updated**: 2026-05-15
 
 ---
 
@@ -21,7 +21,7 @@ The upstream repo uses `Azure/bicep-ptn-aiml-landing-zone` as an infrastructure 
 | Orchestrator | `gpt-rag-orchestrator` v2.6.2 |
 | Ingestion | `gpt-rag-ingestion` v2.3.3 |
 | UI | `gpt-rag-ui` v2.3.1 |
-| Infra submodule | `bicep-ptn-aiml-landing-zone` tracking `main` (was pinned to v1.0.5 → v1.1.4 → v1.1.9 → main) |
+| Infra submodule | `bicep-ptn-aiml-landing-zone` tracking `main` @ `5436d29` (was pinned to v1.0.5 → v1.1.4 → v1.1.9 → main) |
 | Chat model | `gpt-5-nano` (2025-08-07), GlobalStandard, capacity 100 |
 | Embedding model | `text-embedding-3-large` v1, Standard, capacity 40 |
 | Target region | Sweden Central |
@@ -55,6 +55,7 @@ The infra submodule was forked and patched with these fixes (documented in `infr
 | `varAfNetworkingOverride` logic | DNS zone IDs were omitted when using existing zones without Policy | Added `!_useExistingDnsZones` condition |
 | Unconditional subnet creation | All 9 subnets created even when only 3 needed | Refactored to `concat()` with conditional arrays |
 | External DNS zone RG support | No way to reference DNS zones in a different RG/subscription | Added `existingDnsZonesResourceGroupName` and `existingDnsZonesSubscriptionId` parameters |
+| `appConfigPopulate` skipped in Zero Trust | ARM can't write to App Config data plane when public access disabled | Added `tempPublicAppConfig` flag to temporarily allow ARM writes during provisioning |
 
 ### 2. Main Parameters (main.parameters.json)
 
@@ -65,11 +66,17 @@ New parameters added:
 - `deployVpnGateway` — Conditional VPN Gateway subnet creation
 - `enablePrivateLogAnalytics` — Disable AMPLS when monitor DNS zones don't exist
 - `deployVM` converted from hardcoded `true` to `${DEPLOY_VM}` env var
+- `tempPublicAppConfig` — Temporarily deploy App Config with public access for ARM writes in Zero Trust
+- `useUAI` — Use User-Assigned Managed Identities instead of System-Assigned
 - Subnet names/prefixes exposed as env vars (`AGENT_SUBNET_NAME`, `PE_SUBNET_NAME`, etc.)
 
 ### 3. Frontend UI Fix (gpt-rag-ui)
 
 `AZURE_CLIENT_ID` defaulted to `"*"` which broke `ManagedIdentityCredential` when using System Assigned Identity. Fixed to default to `None`.
+
+### 4. Post-Provision: UAI Client ID Seeding (config/containerapps/setup.py)
+
+When `USE_UAI=true`, the `content_understanding` module in `gpt-rag-ingestion` reads `AZURE_CLIENT_ID` from App Configuration (not from container env vars). The Bicep only injected it as an env var, leaving App Config without the key. Added `seed_uai_client_ids()` to the Container Apps setup script — it reads each app's UAI `clientId` and writes it to App Config with the service-specific label (`gpt-rag-ingestion`, `gpt-rag-orchestrator`, `gpt-rag-frontend`).
 
 ### 4. .gitmodules
 
@@ -114,6 +121,22 @@ azd env set ACA_ENVIRONMENT_SUBNET_PREFIX           "10.0.3.0/24"
 - DNS Zone Groups ARE attached, pointing to zones in the specified RG
 - Only required subnets created (3 core + conditional)
 
+### Scenario C: Zero Trust with User-Assigned Identity
+
+```bash
+azd env set NETWORK_ISOLATION              true
+azd env set USE_UAI                        true
+azd env set TEMP_PUBLIC_APP_CONFIG          true
+azd env set DEPLOY_VM                      true
+# ... plus Scenario A or B network settings
+azd provision   # App Config temporarily public, postProvision seeds UAI client IDs, then locks down
+azd deploy
+```
+
+- Container Apps use User-Assigned Managed Identity (no system-assigned)
+- `AZURE_CLIENT_ID` injected as env var AND seeded to App Config per-component label
+- App Config locked down to private-only after postProvision completes
+
 ---
 
 ## Important Architecture Decisions
@@ -123,6 +146,8 @@ azd env set ACA_ENVIRONMENT_SUBNET_PREFIX           "10.0.3.0/24"
 3. **Environment variables drive all parameterization** — `azd env set` populates `${VAR}` placeholders in `main.parameters.json`.
 4. **No MCP Container App** — removed in v2.6.0, MCP consolidated into orchestrator.
 5. **Container Apps on D4 workload profile** — orchestrator, frontend, and dataingest all use a `main` profile (D4, 0-1 instances).
+6. **System Assigned Identity** — When `USE_UAI=false`, ensure no code passes a wildcard or placeholder as `client_id` to `ManagedIdentityCredential`.
+7. **User Assigned Identity** — When `USE_UAI=true`, some component modules (e.g. `content_understanding`) read `AZURE_CLIENT_ID` from App Config, not env vars. The postProvision Container Apps setup seeds this automatically.
 
 ---
 
@@ -155,12 +180,13 @@ azd env set ACA_ENVIRONMENT_SUBNET_PREFIX           "10.0.3.0/24"
 
 ## Known Gotchas
 
-1. **Zero Trust deploy scripts fail** — `az appconfig kv show --name` goes through ARM control plane which is blocked. Manual Container App updates via `az containerapp update` required.
+1. **Zero Trust App Config provisioning** — ARM can't write to App Config data plane when public access is disabled. Use `TEMP_PUBLIC_APP_CONFIG=true` during provisioning; postProvision locks it down after scripts complete.
 2. **AMPLS requires 3 DNS zones** — `oms.opinsights.azure.com`, `ods.opinsights.azure.com`, `agentsvc.azure-automation.net`. If missing, set `ENABLE_PRIVATE_LOG_ANALYTICS=false`.
 3. **System Assigned Identity** — When `USE_UAI=false`, ensure no code passes a wildcard or placeholder as `client_id` to `ManagedIdentityCredential`.
-4. **Submodule dirty state** — `.gitmodules` has `ignore = dirty` to avoid noise from local submodule changes.
-5. **Sweden Central** — Some services have limited availability. The `aiFoundryLocation` parameter allows placing AI Foundry in a different region if needed.
-6. **Embedding capacity** — Was increased from 40 to 100 in v2.6.3 for `text-embedding-3-large` to handle ingestion throughput.
+4. **User Assigned Identity** — When `USE_UAI=true`, `content_understanding` and similar modules need `AZURE_CLIENT_ID` in App Config (seeded automatically by postProvision). If indexing fails with `invalid_scope`, verify the key exists: `az appconfig kv show --endpoint <endpoint> --key AZURE_CLIENT_ID --label gpt-rag-ingestion`.
+5. **Submodule dirty state** — `.gitmodules` has `ignore = dirty` to avoid noise from local submodule changes.
+6. **Sweden Central** — Some services have limited availability. The `aiFoundryLocation` parameter allows placing AI Foundry in a different region if needed.
+7. **Embedding capacity** — Was increased from 40 to 100 in v2.6.3 for `text-embedding-3-large` to handle ingestion throughput.
 
 ---
 

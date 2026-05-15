@@ -32,7 +32,7 @@ from azure.identity import (
     AzureCliCredential,
     ChainedTokenCredential
 )
-from azure.appconfiguration import AzureAppConfigurationClient
+from azure.appconfiguration import AzureAppConfigurationClient, ConfigurationSetting
 from azure.mgmt.appcontainers import ContainerAppsAPIClient
 
 
@@ -82,6 +82,68 @@ def _registry_matches(app, server, desired_identity):
     
     logging.debug(f"  ✗ No matching registry found for server '{server}' with identity '{desired_identity}'")
     return False
+
+
+# Mapping from Container App service_name to the App Config label used by each component.
+# This ensures each component's AppConfigClient (which loads its own label first) picks up
+# its own UAI client_id for ManagedIdentityCredential.
+SERVICE_NAME_TO_APPCONFIG_LABEL = {
+    "dataingest": "gpt-rag-ingestion",
+    "orchestrator": "gpt-rag-orchestrator",
+    "frontend": "gpt-rag-frontend",
+}
+
+
+def seed_uai_client_ids(appconfig, subscription_id, resource_group, apps_list, shared_credential):
+    """
+    When USE_UAI is enabled, each Container App has a User-Assigned Identity whose
+    client_id must be known by the application code to authenticate with Azure services.
+
+    The Container App env var AZURE_CLIENT_ID is injected by Bicep, but some internal
+    modules (e.g. content_understanding in gpt-rag-ingestion) read configuration from
+    App Configuration rather than environment variables.
+
+    This function reads each Container App's UAI client_id and writes it to App Config
+    under the service-specific label so the component code can discover it.
+    """
+    logging.info("Seeding UAI client_id values into App Configuration...")
+
+    client = ContainerAppsAPIClient(shared_credential, subscription_id)
+
+    for app_entry in apps_list:
+        app_name = app_entry.get("name")
+        service_name = app_entry.get("serviceName") or app_entry.get("service_name", "")
+
+        label = SERVICE_NAME_TO_APPCONFIG_LABEL.get(service_name)
+        if not label:
+            logging.debug(f"[{app_name}] No App Config label mapping for service '{service_name}', skipping.")
+            continue
+
+        try:
+            app = client.container_apps.get(resource_group, app_name)
+            uai_dict = getattr(app.identity, "user_assigned_identities", None)
+            if not uai_dict:
+                logging.warning(f"[{app_name}] No user-assigned identity found, skipping client_id seed.")
+                continue
+
+            # The dict has one entry: { uai_resource_id: { clientId, principalId } }
+            uai_info = next(iter(uai_dict.values()))
+            client_id = uai_info.client_id if hasattr(uai_info, "client_id") else uai_info.get("clientId")
+            if not client_id:
+                logging.warning(f"[{app_name}] UAI found but client_id is empty, skipping.")
+                continue
+
+            setting = ConfigurationSetting(
+                key="AZURE_CLIENT_ID",
+                label=label,
+                value=client_id,
+                content_type="text/plain",
+            )
+            appconfig.set_configuration_setting(setting)
+            logging.info(f"[{app_name}] ✅ Set AZURE_CLIENT_ID={client_id} in App Config (label={label})")
+
+        except Exception as e:
+            logging.error(f"[{app_name}] Failed to seed AZURE_CLIENT_ID: {e}")
 
 
 def configure_logging():
@@ -345,6 +407,16 @@ def main():
     
     logging.info(f"⏱️  Total execution time: {overall_elapsed:.2f}s ({overall_elapsed/60:.2f}m)")
     logging.info("="*60)
+
+    # Seed UAI client_id into App Configuration for each container app
+    if use_uai.lower() == "true":
+        logging.info("")
+        logging.info("="*60)
+        logging.info("UAI Client ID Seeding")
+        logging.info("="*60)
+        seed_uai_client_ids(appconfig, subscription_id, resource_group, apps_list, shared_credential)
+    else:
+        logging.info("[SKIP] USE_UAI is not enabled; skipping AZURE_CLIENT_ID seeding.")
 
 
 if __name__ == "__main__":

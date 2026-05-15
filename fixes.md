@@ -9,7 +9,7 @@
 | ------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [1](#fix-1--hub--spoke-policymanagedprivatedns)                                 | `main.parameters.json`, `.gitmodules`, `infra/`    | Hub & Spoke support: skip Private DNS Zone creation when zones already exist in the Hub                                                           |
 | [2](#fix-2--deployvm-converted-to-environment-variable)                         | `main.parameters.json`                             | Convert `deployVM` from hardcoded `true` to env var `${DEPLOY_VM}`                                                                                |
-| [3](#fix-3--frontend-ui-managedidentitycredential-fails-with-system-assigned-identity) | `gpt-rag-ui/connectors/appconfig.py`               | Fix `AZURE_CLIENT_ID` default `"*"` → `None` for System Assigned Identity                                                                        |
+| [3](#fix-3--container-apps-managedidentitycredential-fails-with-system-assigned-identity) | `azd env set USE_UAI true` (no code changes)       | Enable User Assigned Identities so `AZURE_CLIENT_ID` is injected with real UAI clientId           |
 | [4](#fix-4--flat-vnet-pre-existing-private-dns-zones-in-external-resource-group) | `main.parameters.json`, `.gitmodules`, `infra/main.bicep` | Support pre-existing Private DNS Zones in a different Resource Group (flat VNet, no Hub & Spoke) |
 | [5](#fix-5--expose-enableprivateloganalytics-and-infra-submodule-fixes) | `main.parameters.json`, `infra/main.bicep` | Expose `enablePrivateLogAnalytics` + fix hardcoded `pe-subnet` + fix AI Foundry DNS override |
 
@@ -91,63 +91,69 @@ If `DEPLOY_VM` is not defined in the environment, `azd` substitutes `${DEPLOY_VM
 
 ---
 
-## Fix 3 — Frontend UI: `ManagedIdentityCredential` fails with System Assigned Identity
+## Fix 3 — Container Apps: `ManagedIdentityCredential` fails with System Assigned Identity
 
-**Modified file**: `gpt-rag-ui/connectors/appconfig.py`
+**Resolution**: Enable `USE_UAI=true` (no code changes required)
 
-**Problem**: The `frontend` Container App starts in NOT-READY mode (HTTP 503) with the error:
+**Problem**: All Container Apps (frontend, orchestrator, ingestion) start in NOT-READY mode (HTTP 503) with the error:
 
 ```
 ChainedTokenCredential failed to retrieve a token from the included credentials.
 App Service managed identity configuration not found in environment. invalid_scope
 ```
 
-**Root cause**: In `connectors/appconfig.py`, `AZURE_CLIENT_ID` defaults to `"*"`:
+**Root cause**: The component code (e.g. `gpt-rag-ui/connectors/appconfig.py`) does:
 
 ```python
 self.client_id = os.environ.get('AZURE_CLIENT_ID', "*")
+# ...
+ManagedIdentityCredential(client_id=self.client_id)
 ```
 
-This is then passed to `ManagedIdentityCredential(client_id=self.client_id)`. With `USE_UAI=false` (System Assigned Identity), `AZURE_CLIENT_ID` is not defined as an environment variable in the Container App, so it takes the value `"*"`. The SDK tries to acquire a token for a User Assigned Identity with client_id `"*"`, which does not exist → `invalid_scope`.
+With `USE_UAI=false` (System Assigned Identity), the Bicep template intentionally does **not** inject `AZURE_CLIENT_ID` into the Container App env vars (because an empty/invalid value breaks `DefaultAzureCredential`). The code then defaults to `"*"`, and the SDK attempts to acquire a token for a User Assigned Identity with client_id `"*"`, which does not exist → `invalid_scope`.
 
-### Applied change
-
-```diff
-- self.client_id = os.environ.get('AZURE_CLIENT_ID', "*")
-+ self.client_id = os.environ.get('AZURE_CLIENT_ID') or None
+The Bicep has a comment explaining this at L2409-2415:
+```bicep
+// Only inject AZURE_CLIENT_ID when a UAI is actually configured (#38).
+// Emitting an empty AZURE_CLIENT_ID alongside AZURE_TENANT_ID breaks
+// DefaultAzureCredential on the SystemAssigned path...
 ```
 
-When `client_id=None`, `ManagedIdentityCredential()` automatically uses the Container App's System Assigned Identity.
+### Applied fix — enable User Assigned Identities
 
-### Manual re-deploy (when the UI `deploy.ps1` does not work in Zero Trust)
-
-The UI deploy script uses `az appconfig kv show --name` which goes through the ARM control plane and fails in Zero Trust. To re-deploy manually:
-
-```powershell
-cd <gpt-rag-ui-repo>
-
-# Commit the fix
-git add connectors/appconfig.py
-git commit -m "fix: use None default for AZURE_CLIENT_ID to support system-assigned managed identity"
-
-# Build, push, and update
-$tag = (git rev-parse --short HEAD)
-$acr = "<container-registry-name>"           # e.g. cropufsec2ytxss
-$image = "$acr.azurecr.io/azure-gpt-rag/frontend:$tag"
-$appName = "ca-<resource-token>-frontend"    # e.g. ca-opufsec2ytxss-frontend
-$rg = "<resource-group>"                     # e.g. rg-gptrag-spoke-prod-04
-
-az acr login --name $acr
-docker build -t $image .
-docker push $image
-az containerapp update -n $appName -g $rg --image $image
+```bash
+azd env set USE_UAI true
+azd provision
+azd deploy
 ```
+
+This activates the `useUAI` parameter in `main.bicep` (L379), which:
+
+1. **Creates UAIs** for each Container App: `uai-ca-{resourceToken}-{service_name}` (L2347-2352)
+2. **Switches Container Apps** from SystemAssigned → UserAssigned identity (L2378-2381)
+3. **Injects `AZURE_CLIENT_ID`** with the real UAI clientId into the container env vars (L2416-2420)
+4. **Reassigns all RBAC** (App Config Data Reader, Key Vault, Cognitive Services, AI Search, Storage, Cosmos) to the UAI principals (L2884-3123)
+
+The component code then correctly resolves `AZURE_CLIENT_ID` → real UUID → `ManagedIdentityCredential(client_id="real-uuid")` → finds the UAI → authenticates successfully.
+
+### Why not fix the code instead?
+
+Changing `os.environ.get('AZURE_CLIENT_ID', "*")` → `os.environ.get('AZURE_CLIENT_ID') or None` would also work for System Assigned Identity. However:
+- It requires modifying 3 component repos (UI, orchestrator, ingestion)
+- UAI is the recommended approach for production (identity survives container recreation)
+- The Bicep already has full UAI support — just needs the flag enabled
 
 ### Verification
 
 ```powershell
-az containerapp logs show -n $appName -g $rg --type console --tail 15
-# Should show: "Configuration loaded from Azure App Configuration"
+# Check env var injection
+az containerapp show --name ca-<token>-frontend --resource-group <rg> \
+  --query "properties.template.containers[0].env[?name=='AZURE_CLIENT_ID'].value" -o tsv
+# Should return a real UUID (e.g., d5ab6b4b-6ff6-4fdf-84e5-3c1abd16ccdf)
+
+# Check application logs
+az containerapp logs show --name ca-<token>-frontend --resource-group <rg> --type console --tail 15
+# Should show: "Application startup complete." and HTTP 200 responses
 # Should NOT show: "invalid_scope" or "NOT-READY MODE"
 ```
 
