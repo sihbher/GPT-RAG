@@ -25,6 +25,7 @@ import sys
 import json
 import logging
 import time
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from azure.identity import (
@@ -85,12 +86,13 @@ def _registry_matches(app, server, desired_identity):
 
 
 # Mapping from Container App service_name to the App Config label used by each component.
-# This ensures each component's AppConfigClient (which loads its own label first) picks up
-# its own UAI client_id for ManagedIdentityCredential.
+# Only dataingest is included because it is the only component whose internal modules
+# (content_understanding, doc_intelligence) read AZURE_CLIENT_ID from App Config.
+# Orchestrator and frontend read AZURE_CLIENT_ID from their container env vars (injected
+# by Bicep) and do NOT load it from App Config — writing their values here causes
+# cross-label collisions due to SettingSelector(label_filter=None) loading all labels.
 SERVICE_NAME_TO_APPCONFIG_LABEL = {
     "dataingest": "gpt-rag-ingestion",
-    "orchestrator": "gpt-rag-orchestrator",
-    "frontend": "gpt-rag-frontend",
 }
 
 
@@ -217,6 +219,27 @@ def get_config_value(appconfig, key, required=True, max_retries=3):
                 time.sleep(2)
 
 
+def _fallback_cli_registry_set(resource_group, name, acr_server, desired_identity):
+    """Fallback: use 'az containerapp registry set' when the Python SDK is blocked by MFA policies."""
+    logging.warning(f"[{name}] Falling back to Azure CLI for registry association...")
+    cmd = [
+        "az", "containerapp", "registry", "set",
+        "--name", name,
+        "--resource-group", resource_group,
+        "--server", acr_server,
+        "--identity", desired_identity,
+    ]
+    logging.debug(f"[{name}] Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, shell=True)
+    if result.returncode == 0:
+        logging.info(f"[{name}] ✅ CLI fallback succeeded!")
+        return True, "Success (CLI fallback)"
+    else:
+        err_msg = result.stderr.strip() or result.stdout.strip()
+        logging.error(f"[{name}] ❌ CLI fallback failed: {err_msg}")
+        return False, f"CLI fallback failed: {err_msg}"
+
+
 def update_single_container_app(subscription_id, resource_group, name, acr_server, use_uai, shared_credential):
     """Update a single container app registry configuration."""
     start_time = time.time()
@@ -281,6 +304,11 @@ def update_single_container_app(subscription_id, resource_group, name, acr_serve
             
     except Exception as e:
         elapsed = time.time() - start_time
+        error_str = str(e)
+        if "RequestDisallowedByAzure" in error_str or "MFA" in error_str:
+            logging.warning(f"[{name}] SDK blocked by MFA policy (elapsed: {elapsed:.2f}s)")
+            success, msg = _fallback_cli_registry_set(resource_group, name, acr_server, desired_identity)
+            return name, success, msg
         logging.error(f"[{name}] ❌ Unexpected error: {e} (elapsed: {elapsed:.2f}s)", exc_info=True)
         return name, False, str(e)
 

@@ -15,6 +15,7 @@
 | [4](#fix-4--existing-dns-zones-in-external-resource-group) | 98-106, 531, 1586, 1837-1838 | DNS zone support for external Resource Group |
 | [5](#fix-5--appconfigpopulate-skipped-under-network-isolation) | 3436 | `appConfigPopulate` module skipped when `networkIsolation=true` |
 | [6](#fix-6--uai-client_id-not-available-in-app-configuration) | config/containerapps/setup.py | Content Understanding auth fails when `USE_UAI=true` |
+| [7](#fix-7--cosmos-db-enableanalyticalstorage-no-longer-supported) | 2467 | `enableAnalyticalStorage: true` fails on new account creation |
 
 ---
 
@@ -154,6 +155,32 @@ Instead of populating App Config manually from the script, we added a `tempPubli
 2. App Config resource: `publicNetworkAccess: (_networkIsolation && !tempPublicAppConfig) ? 'Disabled' : 'Enabled'`
 3. `appConfigPopulate` condition: `deployAppConfig && (!_networkIsolation || tempPublicAppConfig)`
 4. `cosmosConfigKeyVaultPopulate` condition: `deployCosmosDb && deployAppConfig && (!_networkIsolation || tempPublicAppConfig)`
+
+---
+
+## Fix 7 — Cosmos DB `enableAnalyticalStorage` no longer supported
+
+**File**: `main.bicep` (line 2467)
+
+**Problem**: Provisioning fails with `BadRequest`: "Enabling Analytical Storage during account creation is no longer supported." The `enableAnalyticalStorage` property was hardcoded to `true`.
+
+**Root cause**: Azure deprecated enabling Analytical Storage (Synapse Link) during Cosmos DB account creation as of May 2026. Existing accounts with the feature already enabled continue to work, but new accounts cannot enable it at creation time. Microsoft recommends Fabric Mirroring as the strategic replacement.
+
+**Reference**: https://learn.microsoft.com/en-us/answers/questions/5888858/cosmos-not-able-to-enable-synapse-link
+
+**Impact**: GPT-RAG does not use Synapse Link / Analytical Storage. The Cosmos DB account stores conversations and configuration data only.
+
+### Applied change
+
+```bicep
+// Before:
+enableAnalyticalStorage: true
+
+// After:
+enableAnalyticalStorage: false
+```
+
+**Decision**: Changed to `false` without parameterization since Azure rejects `true` on all new account creations regardless of configuration.
 
 **Parameters** (`main.parameters.json`):
 - `"tempPublicAppConfig": { "value": "${TEMP_PUBLIC_APP_CONFIG=false}" }`

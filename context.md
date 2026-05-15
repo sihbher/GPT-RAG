@@ -21,11 +21,11 @@ The upstream repo uses `Azure/bicep-ptn-aiml-landing-zone` as an infrastructure 
 | Orchestrator | `gpt-rag-orchestrator` v2.6.2 |
 | Ingestion | `gpt-rag-ingestion` v2.3.3 |
 | UI | `gpt-rag-ui` v2.3.1 |
-| Infra submodule | `bicep-ptn-aiml-landing-zone` tracking `main` @ `5436d29` (was pinned to v1.0.5 → v1.1.4 → v1.1.9 → main) |
-| Chat model | `gpt-5-nano` (2025-08-07), GlobalStandard, capacity 100 |
-| Embedding model | `text-embedding-3-large` v1, Standard, capacity 40 |
-| Target region | Sweden Central |
-| Environment name | `gpt-rag-aprl-05` |
+| Infra submodule | `bicep-ptn-aiml-landing-zone` tracking `main` @ `147a327` (was pinned to v1.0.5 → v1.1.4 → v1.1.9 → main) |
+| Chat model | Configured per environment via `main.parameters.json` |
+| Embedding model | Configured per environment via `main.parameters.json` |
+| Target region | Configured per environment (`AZURE_LOCATION`) |
+| Environment name | Ephemeral — created/destroyed per test cycle |
 
 ---
 
@@ -38,8 +38,9 @@ Deploy GPT-RAG in an enterprise environment with:
 3. **No Hub & Spoke Azure Policy** managing DNS — zones are managed manually or by a different team
 4. **Multiple deployment instances** on the same VNet with non-colliding subnet names/CIDRs
 5. **No jumpbox VM / Bastion** (access via existing enterprise tooling)
-6. **System Assigned Managed Identity** (not User Assigned)
+6. **User Assigned Managed Identity** (`USE_UAI=true`) — System Assigned has code-level issues (see Fix 3)
 7. **Zero Trust network isolation** with private endpoints
+8. **MFA-enforced tenants** with Conditional Access Policies
 
 ---
 
@@ -76,9 +77,15 @@ New parameters added:
 
 ### 4. Post-Provision: UAI Client ID Seeding (config/containerapps/setup.py)
 
-When `USE_UAI=true`, the `content_understanding` module in `gpt-rag-ingestion` reads `AZURE_CLIENT_ID` from App Configuration (not from container env vars). The Bicep only injected it as an env var, leaving App Config without the key. Added `seed_uai_client_ids()` to the Container Apps setup script — it reads each app's UAI `clientId` and writes it to App Config with the service-specific label (`gpt-rag-ingestion`, `gpt-rag-orchestrator`, `gpt-rag-frontend`).
+When `USE_UAI=true`, the `content_understanding` and `doc_intelligence` modules in `gpt-rag-ingestion` read `AZURE_CLIENT_ID` from App Configuration (not from container env vars). The Bicep injects it as an env var, but App Config also needs it. Added `seed_uai_client_ids()` to the Container Apps setup script — it reads the dataingest UAI `clientId` and writes it to App Config with the `gpt-rag-ingestion` label.
 
-### 4. .gitmodules
+**Important**: Only dataingest is seeded. Writing `AZURE_CLIENT_ID` for orchestrator/frontend causes cross-label collisions because `gpt-rag-ingestion`'s `appconfig.py` uses `SettingSelector(label_filter=None)` which loads ALL labels, overwriting the correct dataingest value. See Fix 8 in `fixes.md`.
+
+### 5. Post-Provision: MFA CLI Fallback (config/containerapps/setup.py)
+
+In tenants with MFA Conditional Access Policies, the Python SDK (`azure-mgmt-appcontainers`) fails with `RequestDisallowedByAzure` when associating ACR with Container Apps. Added `_fallback_cli_registry_set()` that falls back to `az containerapp registry set` via subprocess. See Fix 6 in `fixes.md`.
+
+### 6. .gitmodules
 
 Points to `sihbher/bicep-ptn-aiml-landing-zone.git` on `main` branch (instead of upstream `Azure/bicep-ptn-aiml-landing-zone` on a pinned tag).
 
@@ -134,8 +141,61 @@ azd deploy
 ```
 
 - Container Apps use User-Assigned Managed Identity (no system-assigned)
-- `AZURE_CLIENT_ID` injected as env var AND seeded to App Config per-component label
+- `AZURE_CLIENT_ID` injected as env var AND seeded to App Config for **dataingest only** (see Fix 8)
 - App Config locked down to private-only after postProvision completes
+- MFA CLI fallback used automatically if needed (see Fix 6)
+
+### Scenario D: Tested — Flat VNet + Zero Trust + UAI + Side-by-Side (fully validated)
+
+This is the complete set of parameters tested end-to-end (provision + deploy + ingestion verified):
+
+```bash
+# Core
+azd env set AZURE_ENV_NAME                          "<env-name>"
+azd env set AZURE_SUBSCRIPTION_ID                   "<subscription-id>"
+azd env set AZURE_RESOURCE_GROUP                    "<resource-group>"
+
+# Network — existing flat VNet, subnets already created, DNS zones in separate RG
+azd env set NETWORK_ISOLATION                       true
+azd env set USE_EXISTING_VNET                       true
+azd env set EXISTING_VNET_RESOURCE_ID               "<vnet-resource-id>"
+azd env set DEPLOY_SUBNETS                          false
+azd env set EXISTING_DNS_ZONES_RESOURCE_GROUP_NAME  "<dns-zones-rg>"
+azd env set POLICY_MANAGED_PRIVATE_DNS              false
+azd env set SIDE_BY_SIDE                            true
+
+# Subnet names (must match pre-existing subnets in the VNet)
+azd env set ACA_ENVIRONMENT_SUBNET_NAME             "<aca-subnet-name>"
+azd env set AGENT_SUBNET_NAME                       "<agent-subnet-name>"
+azd env set PE_SUBNET_NAME                          "<pe-subnet-name>"
+
+# Identity
+azd env set USE_UAI                                 true
+
+# Provisioning workarounds
+azd env set TEMP_PUBLIC_APP_CONFIG                  true
+
+# Disabled features
+azd env set DEPLOY_VM                               false
+azd env set DEPLOY_AZURE_FIREWALL                   false
+azd env set DEPLOY_ACR_TASK_AGENT_POOL              false
+```
+
+Deployment flow:
+```bash
+azd provision   # App Config temporarily public → postProvision seeds UAI + locks down
+azd deploy      # Deploys orchestrator, dataingest, frontend from manifest.json
+```
+
+Key behaviors with this configuration:
+- DNS zones NOT created (exist in `<dns-zones-rg>`)
+- DNS Zone Groups ARE attached to PEs, pointing to existing zones
+- Subnets NOT created (`DEPLOY_SUBNETS=false`) — must pre-exist with matching names
+- `SIDE_BY_SIDE=true` — allows multiple GPT-RAG instances on the same VNet
+- Container Apps use User-Assigned Identity (`USE_UAI=true`)
+- `AZURE_CLIENT_ID` seeded to App Config for **dataingest only** (Fix 8)
+- MFA CLI fallback used automatically if needed (Fix 6)
+- No VM, Bastion, Firewall, or ACR task agent pool deployed
 
 ---
 
@@ -146,8 +206,8 @@ azd deploy
 3. **Environment variables drive all parameterization** — `azd env set` populates `${VAR}` placeholders in `main.parameters.json`.
 4. **No MCP Container App** — removed in v2.6.0, MCP consolidated into orchestrator.
 5. **Container Apps on D4 workload profile** — orchestrator, frontend, and dataingest all use a `main` profile (D4, 0-1 instances).
-6. **System Assigned Identity** — When `USE_UAI=false`, ensure no code passes a wildcard or placeholder as `client_id` to `ManagedIdentityCredential`.
-7. **User Assigned Identity** — When `USE_UAI=true`, some component modules (e.g. `content_understanding`) read `AZURE_CLIENT_ID` from App Config, not env vars. The postProvision Container Apps setup seeds this automatically.
+6. **System Assigned Identity** — When `USE_UAI=false`, component code defaults `AZURE_CLIENT_ID` to `"*"` which breaks `ManagedIdentityCredential`. Use `USE_UAI=true` instead (Fix 3).
+7. **User Assigned Identity** — When `USE_UAI=true`, `content_understanding` and `doc_intelligence` read `AZURE_CLIENT_ID` from App Config. The postProvision seeds this for **dataingest only** — writing it for other components causes cross-label collisions (Fix 8).
 
 ---
 
@@ -182,11 +242,13 @@ azd deploy
 
 1. **Zero Trust App Config provisioning** — ARM can't write to App Config data plane when public access is disabled. Use `TEMP_PUBLIC_APP_CONFIG=true` during provisioning; postProvision locks it down after scripts complete.
 2. **AMPLS requires 3 DNS zones** — `oms.opinsights.azure.com`, `ods.opinsights.azure.com`, `agentsvc.azure-automation.net`. If missing, set `ENABLE_PRIVATE_LOG_ANALYTICS=false`.
-3. **System Assigned Identity** — When `USE_UAI=false`, ensure no code passes a wildcard or placeholder as `client_id` to `ManagedIdentityCredential`.
-4. **User Assigned Identity** — When `USE_UAI=true`, `content_understanding` and similar modules need `AZURE_CLIENT_ID` in App Config (seeded automatically by postProvision). If indexing fails with `invalid_scope`, verify the key exists: `az appconfig kv show --endpoint <endpoint> --key AZURE_CLIENT_ID --label gpt-rag-ingestion`.
-5. **Submodule dirty state** — `.gitmodules` has `ignore = dirty` to avoid noise from local submodule changes.
-6. **Sweden Central** — Some services have limited availability. The `aiFoundryLocation` parameter allows placing AI Foundry in a different region if needed.
-7. **Embedding capacity** — Was increased from 40 to 100 in v2.6.3 for `text-embedding-3-large` to handle ingestion throughput.
+3. **`USE_UAI=false` is broken** — Component code defaults `AZURE_CLIENT_ID` to `"*"` → all auth fails. Always use `USE_UAI=true` (Fix 3).
+4. **`AZURE_CLIENT_ID` App Config collision** — When `USE_UAI=true`, only dataingest should have `AZURE_CLIENT_ID` in App Config. If multiple entries exist under different labels, the ingestion `SettingSelector(label_filter=None)` loads all, and the wrong value wins. **Quick diagnosis**: compare `az containerapp show ... --query env[?name=='AZURE_CLIENT_ID']` vs `az appconfig kv list --key AZURE_CLIENT_ID`. If multiple labels with different values exist → collision. Delete non-ingestion entries. See Fix 8 in `fixes.md` for full diagnosis guide.
+5. **MFA Conditional Access** — Python SDK may fail with `RequestDisallowedByAzure` during postProvision. The CLI fallback in `setup.py` handles this automatically (Fix 6).
+6. **Submodule dirty state** — `.gitmodules` has `ignore = dirty` to avoid noise from local submodule changes.
+7. **Region availability** — Some services have limited availability. The `aiFoundryLocation` parameter allows placing AI Foundry in a different region if needed.
+8. **Embedding capacity** — May need to be increased for `text-embedding-3-large` to handle ingestion throughput.
+9. **Blocked files in dataingest** — If a PDF fails indexing 3+ times (e.g. due to auth errors), it gets permanently blocked (`ITEM-BLOCKED`). After fixing the root cause, use the `/api/files/unblock` endpoint or delete the job blob from the `jobs` container and force a new revision. See Fix 8 verification section.
 
 ---
 
