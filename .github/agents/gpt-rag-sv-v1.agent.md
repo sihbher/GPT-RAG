@@ -98,9 +98,40 @@ Execute phases using the scripts in `scripts/agent/`. Read each script before ru
 | MFA blocks ACR | CLI fallback (Fix 6) | — |
 | Container NOT-READY | Check Fix 3 / Fix 8 | Delete App Config collision entries |
 
+## Jumpbox Bootstrap (First-Time Setup)
+
+When deploying to a fresh Jumpbox, install prerequisites in this order:
+
+1. **PowerShell 7** (FIRST — required for all scripts):
+   ```powershell
+   winget install Microsoft.PowerShell --accept-package-agreements --accept-source-agreements
+   ```
+   Then reopen terminal as PowerShell 7 (`pwsh`).
+
+2. **Core tools** (from PowerShell 7):
+   ```powershell
+   winget install Git.Git GitHub.cli Microsoft.AzureCLI Microsoft.Azd Python.Python.3.12 Microsoft.VisualStudioCode --accept-package-agreements --accept-source-agreements
+   ```
+
+3. **Docker Desktop** (requires WSL2 + reboot):
+   ```powershell
+   wsl --install --no-distribution
+   # REBOOT
+   winget install Docker.DockerDesktop --accept-package-agreements
+   # LOGOUT/LOGIN for docker group
+   ```
+
+4. **Authenticate** (interactive — agent cannot do this):
+   ```powershell
+   az login --use-device-code
+   azd auth login --use-device-code
+   gh auth login
+   ```
+
 ## Human Interaction Points
 
 The agent CANNOT do these (require interactive auth or human judgment):
+- PowerShell 7 initial install (requires terminal restart)
 - `az login --use-device-code` / `azd auth login --use-device-code` / `gh auth login`
 - Docker Desktop first-time install (WSL2 + reboot)
 - RBAC role assignment (requires admin)
