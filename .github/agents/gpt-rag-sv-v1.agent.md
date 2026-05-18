@@ -146,3 +146,4 @@ The agent CANNOT do these (require interactive auth or human judgment):
 - DO NOT run `azd provision` without displaying all parameters first
 - ALWAYS log actions and maintain the resource manifest
 - ALWAYS read `fixes.md` and `infra-fixes.md` before troubleshooting failures
+- When user asks for "context to share" or "handoff context", ALWAYS include: current state, environment values, azd env set commands, repo clone commands, and remaining steps
