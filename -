@@ -1,0 +1,40 @@
+{
+  "indexerType": "blob-storage-indexer",
+  "blob": "BUDGET-2027-APP.pdf",
+  "parent_id": "/documents/BUDGET-2027-APP.pdf",
+  "last_modified": "2026-05-19T15:19:00+00:00",
+  "startedAt": "2026-05-19T15:52:51.020194+00:00",
+  "runId": "20260519T155250Z",
+  "chunksIds": "documents-BUDGET-2027-APP-pdf-c*",
+  "processingAttempts": 4,
+  "lastAttemptAt": "2026-05-19T15:52:51.020194+00:00",
+  "blocked": true,
+  "blockedAt": "2026-05-19T15:52:51.020194+00:00",
+  "blockedReason": "max_attempts_exceeded",
+  "runHistory": [
+    {
+      "runId": "20260519T155250Z",
+      "status": "blocked",
+      "startedAt": "2026-05-19T15:52:51.020194+00:00",
+      "finishedAt": "2026-05-19T15:52:51.020194+00:00",
+      "error": "File blocked after 4 attempts (max 3). Previous attempts may have ended due to a crash or timeout before an error could be recorded."
+    },
+    {
+      "runId": "20260519T154541Z",
+      "status": "error",
+      "startedAt": "2026-05-19T15:45:42.736352+00:00",
+      "finishedAt": "2026-05-19T15:45:59.533881+00:00",
+      "error": "Error in doc_analysis_chunker analyzing BUDGET-2027-APP.pdf: Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot."
+    },
+    {
+      "runId": "20260519T153655Z",
+      "status": "error",
+      "startedAt": "2026-05-19T15:36:55.905414+00:00",
+      "finishedAt": "2026-05-19T15:37:11.043521+00:00",
+      "error": "Error in doc_analysis_chunker analyzing BUDGET-2027-APP.pdf: Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot., Auth failed: ChainedTokenCredential failed to retrieve a token from the included credentials.\nAttempted credentials:\n\tAzureCliCredential: Azure CLI not found on path\n\tManagedIdentityCredential: App Service managed identity configuration not found in environment. invalid_scope\nTo mitigate this issue, please refer to the troubleshooting guidelines here at https://aka.ms/azsdk/python/identity/defaultazurecredential/troubleshoot."
+    }
+  ],
+  "status": "blocked",
+  "error": "File blocked after 4 attempts (max 3). Previous attempts may have ended due to a crash or timeout before an error could be recorded.",
+  "finishedAt": "2026-05-19T15:52:51.020194+00:00"
+}
