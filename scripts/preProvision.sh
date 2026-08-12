@@ -66,6 +66,13 @@ for FILE_NAME in manifest.json main.parameters.json; do
     fi
 done
 
+# Resolve azd env tokens nested in modelDeploymentList[].sku.name in the copied
+# infra parameters, so the landing-zone preflight and azd see concrete SKUs.
+RESOLVE_SKUS_SCRIPT="$SCRIPT_DIR/Resolve-ModelDeploymentSkus.ps1"
+if [ -f "$RESOLVE_SKUS_SCRIPT" ] && command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -File "$RESOLVE_SKUS_SCRIPT" -ParameterFile "$INFRA_DIR/main.parameters.json"
+fi
+
 ###############################################################################
 # GPT-RAG regional readiness preflight
 ###############################################################################

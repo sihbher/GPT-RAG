@@ -445,10 +445,10 @@ function Test-ModelReadiness {
 
     foreach ($deployment in @($Models)) {
         $model = $deployment.model
-        $modelName = $model.name
-        $modelVersion = $model.version
-        $skuName = $deployment.sku.name
-        $capacity = [double]$deployment.sku.capacity
+        $modelName = Resolve-TemplateValue $model.name
+        $modelVersion = Resolve-TemplateValue $model.version
+        $skuName = Resolve-TemplateValue $deployment.sku.name
+        $capacity = [double](Resolve-TemplateValue $deployment.sku.capacity)
         $checkName = "model:$modelName"
 
         $available = @($modelList | Where-Object {

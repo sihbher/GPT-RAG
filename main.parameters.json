@@ -161,7 +161,7 @@
             "version": "2025-08-07"
           },
           "sku": {
-            "name": "GlobalStandard",
+            "name": "${CHAT_DEPLOYMENT_SKU=GlobalStandard}",
             "capacity": 100
           },
           "canonical_name": "CHAT_DEPLOYMENT_NAME",
@@ -175,7 +175,7 @@
             "version": "1"
           },
           "sku": {
-            "name": "Standard",
+            "name": "${EMBEDDING_DEPLOYMENT_SKU=Standard}",
             "capacity": 100
           },
           "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",

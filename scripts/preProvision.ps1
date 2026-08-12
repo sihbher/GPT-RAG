@@ -54,6 +54,13 @@ foreach ($fileName in @("manifest.json", "main.parameters.json")) {
     }
 }
 
+# Resolve azd env tokens nested in modelDeploymentList[].sku.name in the copied
+# infra parameters, so the landing-zone preflight and azd see concrete SKUs.
+$resolveSkusScript = Join-Path $PSScriptRoot "Resolve-ModelDeploymentSkus.ps1"
+if (Test-Path $resolveSkusScript) {
+    & pwsh -NoProfile -File $resolveSkusScript -ParameterFile (Join-Path $infraDir "main.parameters.json")
+}
+
 # Helper to match truthy values (1, true, t)
 function Test-Truthy($value) {
     if (-not $value) { return $false }
