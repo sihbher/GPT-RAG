@@ -40,8 +40,8 @@
 | Item | Value |
 |---|---|
 | azd environment name | `gptrag-bot01` |
-| Subscription | `28d32630-2b48-4488-bffe-e1864f6624d6` (HCD non-prod) |
-| Resource group | `HCD-WUS-NP-GENAI-APR-RG-02` |
+| Subscription | `*******` (HCD non-prod) |
+| Resource group | `*******` |
 | Region | `westus` |
 | Model chat SKU | `DataZoneStandard` (`CHAT_DEPLOYMENT_SKU`) |
 | Model embedding SKU | `DataZoneStandard` (`EMBEDDING_DEPLOYMENT_SKU`) |
@@ -131,11 +131,11 @@ az keyvault secret list --vault-name kv-iunaos-gptrag-bot01-w --query "[].name" 
 az keyvault secret show  --vault-name kv-iunaos-gptrag-bot01-w --name <secret-name> --query value -o tsv
 
 # (optional) exact Bastion host name
-az resource list -g HCD-WUS-NP-GENAI-APR-RG-02 \
+az resource list -g ******* \
   --resource-type Microsoft.Network/bastionHosts --query "[].name" -o tsv
 ```
 
-Then connect: **Azure Portal → resource group `HCD-WUS-NP-GENAI-APR-RG-02` →
+Then connect: **Azure Portal → resource group `*******` →
 VM `testvmiunaoskcf` → Connect → Bastion → RDP** with user `testvmuser` and the
 password above. (Windows VM = RDP over Bastion.)
 
@@ -162,8 +162,8 @@ it points at the already-provisioned resource group:
 
 ```powershell
 azd env new gptrag-bot01
-azd env set AZURE_SUBSCRIPTION_ID 28d32630-2b48-4488-bffe-e1864f6624d6
-azd env set AZURE_RESOURCE_GROUP  HCD-WUS-NP-GENAI-APR-RG-02
+azd env set AZURE_SUBSCRIPTION_ID *******
+azd env set AZURE_RESOURCE_GROUP  *******
 azd env set AZURE_LOCATION        westus
 azd env set NETWORK_ISOLATION     true
 azd env set CHAT_DEPLOYMENT_SKU       DataZoneStandard
@@ -202,7 +202,7 @@ If you prefer to run the hook directly, the Windows variant is
   bypass failures — fix the cause.
 - Keep the four repo customizations above intact.
 - Verify the active subscription before any `azd`/`az` action:
-  `az account show -o table` → must be `28d32630-2b48-4488-bffe-e1864f6624d6`.
+  `az account show -o table` → must be `*******`.
 - Do not commit secrets. Passwords are retrieved from Key Vault at connect time.
 
 ---
