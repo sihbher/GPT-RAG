@@ -5,7 +5,7 @@
 | Versión           | v1                                                          |
 | Fecha             | 2026-08-13                                                  |
 | Autor             | Gerardo Reyes                                               |
-| Contexto          | Aclaración surgida durante el deploy HCD ([01-azd-deploy.md](01-azd-deploy.md)) |
+| Contexto          | Aclaración surgida durante el post-provision HCD ([01-azd-postprovision.md](01-azd-postprovision.md)) |
 | Aplica a          | Entorno `gptrag-bot01` (`RETRIEVAL_BACKEND=foundry_iq`)     |
 ```toc
 ```
@@ -137,7 +137,7 @@ código del orquestador. Menos código propio, más capacidades "de fábrica".
 - Shared private links Search → **Foundry / OpenAI / Cognitive Services** (para
   embeddings y extracción) y Search → **Storage blob** (para ingesta nativa).
 - **Estos SPL nacen `Pending` y hay que aprobarlos** — justo el paso que resolvimos
-  en [01-azd-deploy.md](01-azd-deploy.md) (el 403 "Public access is disabled").
+  en [01-azd-postprovision.md](01-azd-postprovision.md) (el 403 "Public access is disabled").
 
 ---
 
@@ -202,7 +202,7 @@ este caso.
   Storage.
 - Con `ai_search` ese knowledge source **no existiría** y no habría chocado con ese
   SPL — pero tampoco tendrías las capacidades de Foundry IQ. Ver el detalle y el fix
-  en [01-azd-deploy.md](01-azd-deploy.md) (Paso 2).
+  en [01-azd-postprovision.md](01-azd-postprovision.md) (Paso 2).
 
 ---
 

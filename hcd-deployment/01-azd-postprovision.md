@@ -1,8 +1,8 @@
-# Despliegue de las Apps GPT RAG en HCD (azd deploy)
+# Post-Provision de GPT RAG en HCD (data-plane, desde la jump VM)
 
 | Campo             | Valor                                                        |
 | ----------------- | ----------------------------------------------------------- |
-| Versión           | v1                                                          |
+| Versión           | v2                                                          |
 | Fecha inicio      | 2026-08-13                                                  |
 | Autor             | Gerardo Reyes                                               |
 | Suscripción       | HCD-NON-PROD (`*******`)                                    |
@@ -10,34 +10,36 @@
 | Entorno azd       | `gptrag-bot01`                                              |
 | Grupo de recursos | `*******`                                                   |
 | Región            | `westus`                                                    |
-| Continúa de       | [00-test.md](00-test.md) (Paso 16)                          |
+| Continúa de       | [00-azd-provision.md](00-azd-provision.md) (Paso 16)        |
+| Continúa en       | [02-azd-deploy.md](02-azd-deploy.md)                        |
 ```toc
 ```
 
 ## Objetivo
 
-Continuar el despliegue **desde la jump VM (dentro de la VNet)**: rehidratar el
-entorno `azd` en la máquina, completar el **post-provision** (data-plane) y
-**desplegar las Container Apps**, respetando la postura Zero Trust y la
-residencia US (`DataZoneStandard`).
+**Desde la jump VM (dentro de la VNet)**: rehidratar el entorno `azd` en la máquina
+y completar el **post-provision** (data-plane: App Configuration, governance,
+índices y el knowledge source/base de Foundry IQ), respetando la postura Zero Trust
+y la residencia US (`DataZoneStandard`). El **deploy de las Container Apps** se
+documenta aparte en [02-azd-deploy.md](02-azd-deploy.md).
 
 ## Historial de versiones
 
 | Versión | Fecha      | Cambios                                                                                                             |
 | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------- |
-| v1      | 2026-08-13 | Rehidratación del entorno `azd` en la jump VM confirmada (`.env` con outputs). Plan de `azd deploy` sin Docker en `westus`. |
+| v1      | 2026-08-13 | Rehidratación del entorno `azd` en la jump VM confirmada (`.env` con outputs).                                     |
+| v2      | 2026-08-13 | Documento reenfocado a **post-provision**; el deploy se movió a `02-azd-deploy.md`. Post-provision desbloqueado tras aprobar los 4 SPL. |
 
 ---
 
 ## Punto de partida
 
-Al terminar [00-test.md](00-test.md):
+Al terminar [00-azd-provision.md](00-azd-provision.md):
 
 - `azd provision` = **SUCCESS**; toda la infraestructura creada en el RG.
 - Acceso a la jump VM por Bastion (túnel nativo + RDP) **confirmado**.
-- Pendiente: **post-provision + deploy de apps**, que deben correr **dentro de la VNet**.
-- Bloqueo abierto: **ACR Tasks agent pool no disponible en `westus`** → deploy sin
-  Docker requiere una alternativa (ver Paso 3).
+- Pendiente: **post-provision** (este documento) y **deploy de apps**
+  ([02-azd-deploy.md](02-azd-deploy.md)), que deben correr **dentro de la VNet**.
 
 ---
 
@@ -245,8 +247,9 @@ az search shared-private-link-resource show `
 azd hooks run postprovision
 ```
 
-> El deploy de las **imágenes** (Paso 3) **no depende** del knowledge base, así
-> que puede hacerse en paralelo; la retrieval se habilita al aprobar el SPL.
+> El deploy de las **imágenes** (ver [02-azd-deploy.md](02-azd-deploy.md)) **no
+> depende** del knowledge base, así que puede hacerse en paralelo; la retrieval se
+> habilita al aprobar el SPL.
 
 > ✅ **Aprobación aplicada (2026-08-13):** `az storage account
 > private-endpoint-connection approve` devolvió `status: Approved` y el SPL
@@ -254,6 +257,88 @@ azd hooks run postprovision
 > una suscripción/RG gestionados por AI Search — `.../resourceGroups/azscbyd` —
 > lo cual es normal para los shared private link de Search.) Reintento del
 > post-provision en curso.
+
+#### ⚠️ No basta el SPL del blob: hay que aprobar los CUATRO
+
+El reintento **volvió a fallar con 403** aunque el SPL del blob estaba `Approved`.
+Causa: el knowledge source usa `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=standard`
+(Content Understanding), así que el `PUT knowledgesources` **valida también el AI
+Services / Foundry** (`FOUNDRY_IQ_AI_SERVICES_ENDPOINT=https://aif-...services.ai.azure.com/`).
+Esos tres SPL apuntan al **Foundry account** (`aif-...`) y **seguían `Pending`**:
+
+| SPL | groupId | Apunta a |
+|---|---|---|
+| `spl-...-blob-0` | `blob` | Storage `stiunaosgptragbot01wus00` |
+| `spl-...-openai_account-1` | `openai_account` | Foundry `aif-...` |
+| `spl-...-foundry_account-1` | `foundry_account` | Foundry `aif-...` |
+| `spl-...-cognitiveservices_account-1` | `cognitiveservices_account` | Foundry `aif-...` |
+
+Aprobar las 3 conexiones Pending del Foundry account (PIM):
+
+```powershell
+$FID = az cognitiveservices account show -n aif-iunaos-gptrag-bot01-wus-001 `
+  -g HCD-WUS-NP-GENAI-APR-RG-02 --query id -o tsv
+
+# IDs Pending
+az network private-endpoint-connection list --id $FID `
+  --query "[?properties.privateLinkServiceConnectionState.status=='Pending'].id" -o tsv
+
+# aprobar cada uno
+az network private-endpoint-connection approve --id "<id>" `
+  --description "AI Search Foundry IQ standard extraction"
+```
+
+Resultado (2026-08-13): **los 4 SPL en `Approved`**. Esperar 1–2 min de
+propagación y reintentar `azd hooks run postprovision`.
+
+> **Gap de AILZ (Change 5):** AILZ crea los cuatro shared private links pero **no
+> auto-aprueba ninguno**. En un despliegue ZTA el operador debe aprobar
+> manualmente **blob + los 3 del Foundry account** antes de que el knowledge
+> source de Foundry IQ pueda crearse.
+
+#### ⚠️ Tercer intento: 401 por nombre de storage mal resuelto (bug de `postProvision.ps1`)
+
+Con los 4 SPL aprobados, el reintento **avanzó** (ya no 403 de red) pero falló con
+**401** en el knowledge source:
+
+```
+PUT knowledgesources/knowledge-base-blob-ks failed 401:
+  Unable to retrieve blob container for account 'stiunaoskcfg3y2' using your managed identity...
+  (e.g., Storage Blob Data Reader)
+```
+
+Nombre clave: **`stiunaoskcfg3y2`** — la cuenta **inexistente** (el "legacy
+fallback"). El knowledge source apuntaba a un storage que no existe.
+
+**Causa raíz (bug en [scripts/postProvision.ps1](scripts/postProvision.ps1)):** la
+función `_resolveResource` lista los storage del RG y descarta los que empiezan por
+`staif`; en este RG quedaban **dos** que pasan el filtro
+(`stiunaosgptragbot01wus00` y el BYO **`hcdgenai`**), así que —al haber más de uno—
+cayó al **fallback legacy** `st$RESOURCE_TOKEN` = `stiunaoskcfg3y2` (inexistente).
+Ese nombre se selló en `STORAGE_ACCOUNT_RESOURCE_ID` (líneas 343/512) y el knowledge
+source lo usa (`"connectionString": "ResourceId={{STORAGE_ACCOUNT_RESOURCE_ID}}"` en
+[config/search/search.j2](config/search/search.j2)) → 401.
+
+> El **rol está bien**: el Bicep otorga `Storage Blob Data Reader` a la MI de Search
+> sobre el storage principal ([infra/main.bicep](infra/main.bicep) línea 3421). El
+> único problema era el **nombre**.
+
+**Fix (en este repo):** exigir el prefijo `st` en el filtro para que el BYO
+`hcdgenai` no genere ambigüedad:
+
+```powershell
+# scripts/postProvision.ps1 (resolver de storage)
+-Filter { $_.name.StartsWith('st') -and -not $_.name.StartsWith('staif') }
+```
+
+Así queda **un solo** match (`stiunaosgptragbot01wus00`) → `STORAGE_ACCOUNT_RESOURCE_ID`
+correcto → el knowledge source lee el storage real (SPL aprobado + rol presente).
+Tras el fix, reintentar `azd hooks run postprovision`.
+
+> El `postProvision.sh` **no** tiene esta lógica de descubrimiento (solo la `.ps1`
+> puebla App Config con nombres resueltos), así que no hay contraparte que alinear.
+> Es un bug de GPT-RAG (no vendorizado) → **candidato a PR/Change 6**: `_resolveResource`
+> debe exigir el prefijo `st` para no confundirse con storage accounts ajenos en el RG.
 
 ### ¿Por qué se provisiona Foundry IQ si "no lo vamos a usar"?
 
@@ -279,90 +364,31 @@ reconfigurar (y re-aprovisionar parte de) lo ya desplegado con `foundry_iq`.
 
 ---
 
-## Paso 3: Desplegar las Container Apps sin Docker (`westus`)
+## Paso 3: Validación del post-provision
 
-Recordatorio del bloqueo (00-test.md, Paso 16): en red aislada el ACR es Premium
-con acceso público deshabilitado, y el **agent pool de ACR Tasks no existe en
-`westus`**, así que el path por defecto "sin Docker vía agent pool en la VNet" no
-aplica. La jumpbox no trae Docker a propósito.
-
-### Opción A (recomendada): abrir el ACR temporalmente + `azd deploy`
+Cuando el reintento de `azd hooks run postprovision` termine en **exit 0**,
+verificar el data-plane:
 
 ```powershell
-$ACR = "criunaosgptragbot01wus001"
-az acr update -n $ACR --public-network-access Enabled     # requiere PIM (Network write)
-azd deploy
-az acr update -n $ACR --public-network-access Disabled    # volver a cerrar
+# los 4 shared private links de Search en Approved
+az search shared-private-link-resource list `
+  --service-name srch-iunaos-gptrag-bot01-wus-001 -g HCD-WUS-NP-GENAI-APR-RG-02 `
+  --query "[].{name:name, status:properties.status}" -o table
+
+# App Configuration poblado (label gpt-rag)
+az appconfig kv show --endpoint https://appcs-iunaos-gptrag-bot01-wus-001.azconfig.io `
+  --key CONTAINER_REGISTRY_NAME --label gpt-rag --auth-mode login --query value -o tsv
 ```
 
-Ventana breve de exposición del ACR (el push igual requiere autenticación).
+En el log del post-provision, confirmar que el knowledge source/base se crearon:
 
-#### Ejecución real (2026-08-13)
+```
+🧠 Knowledge sources creation completed: 1/1 successful
+📚 Knowledge bases creation completed: 1/1 successful
+```
 
-Se toparon dos obstáculos antes de que el ACR quedara abierto:
-
-1. **`az acr update --public-network-access` no reconocido.** El `az` CLI de la
-   jump VM es viejo y ese flag no existe en su `az acr update`:
-
-   ```
-   unrecognized arguments: --public-network-access Enabled
-   ```
-
-   **Fallback (sin actualizar CLI):** parchear la propiedad por el plano de
-   recursos genérico con `az resource update`:
-
-   ```powershell
-   $RG    = (azd env get-value AZURE_RESOURCE_GROUP)
-   $ACR   = az acr list -g $RG --query "[0].name" -o tsv   # criunaosgptragbot01wus001
-   $ACRID = az acr show -n $ACR --query id -o tsv
-
-   az resource update --ids $ACRID --set properties.publicNetworkAccess=Enabled
-   az resource show   --ids $ACRID --query "properties.publicNetworkAccess" -o tsv   # -> Enabled
-   ```
-
-2. **`AuthorizationFailed` en el primer intento (PIM expirado).**
-
-   ```
-   (AuthorizationFailed) ... does not have authorization to perform action
-   'Microsoft.ContainerRegistry/registries/write' ...
-   If access was recently granted, please refresh your credentials.
-   ```
-
-   El rol es PIM-elegible; tras **reactivar PIM** y reintentar, el
-   `az resource update` funcionó y el ACR quedó `publicNetworkAccess: Enabled`
-   (con `networkRuleSet.defaultAction: Allow`, SKU Premium). Luego se lanzó
-   `azd deploy`.
-
-> ⚠️ **Recordatorio:** al terminar el deploy, **volver a cerrar** el ACR con el
-> mismo mecanismo:
->
-> ```powershell
-> az resource update --ids $ACRID --set properties.publicNetworkAccess=Disabled
-> az resource show   --ids $ACRID --query "properties.publicNetworkAccess" -o tsv   # -> Disabled
-> ```
->
-> Hazlo aunque el deploy falle, para no dejar el ACR expuesto.
-
-> Alternativa: `az upgrade` para tener los flags nativos
-> (`az acr update -n $ACR --public-network-access Enabled/Disabled`).
-
-### Opción B: cambiar a una región con agent pools
-
-Redeploy completo en `westus2` / `eastus2` / `southcentralus` y re-verificar que
-`DataZoneStandard` esté disponible allí para ambos modelos.
-
-### Opción C: Docker dentro de la VNet
-
-Instalar Docker en la jumpbox u otra VM — es, efectivamente, usar Docker.
-
----
-
-## Paso 4: Validación
-
-- Las 3 Container Apps (`orchestrator`, `frontend`, `dataingest`) **running** y healthy.
-- Claves de App Configuration (label `gpt-rag`) pobladas.
-- El endpoint del frontend responde por la ruta de acceso privada.
-- Model deployments en `DataZoneStandard` (requisito de residencia).
+Con esto el data-plane queda completo. El **deploy de las Container Apps** continúa
+en [02-azd-deploy.md](02-azd-deploy.md).
 
 ---
 
@@ -378,31 +404,34 @@ Instalar Docker en la jumpbox u otra VM — es, efectivamente, usar Docker.
 
 ---
 
-## Estado actual
+## Estado actual (post-provision)
 
 - Entorno `azd` `gptrag-bot01` **rehidratado** en la jump VM (`.env` con 54 outputs
   vía `azd env refresh`, deployment `gptrag-bot01-1786492185`).
-- ACR `criunaosgptragbot01wus001` **abierto temporalmente**
-  (`publicNetworkAccess: Enabled`) vía `az resource update`.
 - Conditional Access (AADSTS53003) sobre App Config/Graph desde la VM → **resuelto**
   con `az login --scope` interactivo (era MFA, no device-compliance).
-- **Post-provision** ejecutado vía `azd hooks run postprovision`: App Config poblado
-  (**136 claves**), governance/Foundry/Container-Apps/índices OK; **falla solo** la
-  creación del knowledge source/base de **Foundry IQ** (Search→Storage blob 403 por
-  SPL no operativo).
-- SPL Search→Storage `blob` **aprobado** (`status: Approved`) → reintentando el
-  post-provision para crear el knowledge source/base.
-- Pendiente: confirmar knowledge base creada; deploy de imágenes; cerrar el ACR.
+- **Post-provision** vía `azd hooks run postprovision`: App Config poblado
+  (**136 claves**), governance/Foundry/Container-Apps/índices OK.
+- **Los 4 shared private links de Search aprobados** (`blob` + `openai_account` +
+  `foundry_account` + `cognitiveservices_account`) → desbloquea el knowledge
+  source/base de Foundry IQ.
+- Reintento tras SPL: **401** por nombre de storage mal resuelto (`stiunaoskcfg3y2`
+  inexistente) → **fix aplicado** en [scripts/postProvision.ps1](scripts/postProvision.ps1)
+  (filtro exige prefijo `st`).
+- ✅ **Post-provision COMPLETO (2026-08-14, exit 0):** tras el fix, el reintento
+  resolvió el storage real (`stiunaosgptragbot01wus00`) y creó el knowledge source
+  (`PUT knowledgesources/knowledge-base-blob-ks` 201) y la knowledge base
+  (`PUT knowledgebases/knowledge-base` 201, `executionEnvironment: Private`).
+  `SUCCESS: Your hooks have been run successfully`.
+- Siguiente: **deploy de apps** → [02-azd-deploy.md](02-azd-deploy.md).
 
 ## Próximos pasos
 
 - [x] Rehidratar el entorno `azd` en la jump VM (`azd env refresh`).
 - [x] Resolver Conditional Access para App Config (`az login --scope`).
-- [x] Abrir el ACR temporalmente (`publicNetworkAccess=Enabled`).
 - [x] Post-provision vía `azd hooks run postprovision` → App Config poblado (136 claves).
-- [x] Aprobar el SPL Search→Storage `blob` (`status: Approved`).
-- [ ] Reintentar `azd hooks run postprovision` → knowledge source/base creados.
-- [ ] `azd deploy` — build + deploy de las 3 Container Apps (App Config ya listo).
-- [ ] **Cerrar el ACR** (`publicNetworkAccess=Disabled`) al terminar el deploy.
-- [ ] Validar apps (orchestrator / frontend / dataingest) + endpoint + retrieval.
+- [x] Aprobar **los 4 SPL** de Search (blob + Foundry account openai/foundry/cognitiveservices).
+- [x] Fix del resolver de storage en `postProvision.ps1` (prefijo `st`) por el 401.
+- [x] Reintentar `azd hooks run postprovision` → knowledge source/base creados (**exit 0**).
+- [ ] Continuar con el **deploy** → [02-azd-deploy.md](02-azd-deploy.md).
 - [ ] Abrir el PR a `Azure/bicep-ptn-aiml-landing-zone` (`ailz-improvements.md`, Changes 1–5).

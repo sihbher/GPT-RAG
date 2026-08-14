@@ -256,10 +256,11 @@ function Set-GptRagAppConfiguration {
     }
 
     # Storage: main workload vs AI Foundry storage (prefix "staif")
+    # Require the "st" prefix so unrelated BYO storage accounts in the RG don't create an ambiguous match that forces the legacy-name fallback.
     $storageName = _resolveResource `
         -Type 'Microsoft.Storage/storageAccounts' `
         -Fallback "st$nameSuffix" `
-        -Filter { -not $_.name.StartsWith('staif') }
+        -Filter { $_.name.StartsWith('st') -and -not $_.name.StartsWith('staif') }
     $foundryStorageName = _resolveResource `
         -Type 'Microsoft.Storage/storageAccounts' `
         -Fallback "staif$nameSuffix" `
