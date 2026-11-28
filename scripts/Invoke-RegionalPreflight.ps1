@@ -358,6 +358,55 @@ function Test-QuotaRemaining {
     }
 }
 
+function Get-VmSizeAlternatives {
+    # Read-only hint for an unusable VM_SIZE: no single default SKU is
+    # available in every region/subscription, so suggest same-vCPU x64 sizes the
+    # jumpbox image and disk configuration support (SCSI, Premium SSD).
+    param(
+        [Parameter(Mandatory = $true)][string]$Location,
+        [Parameter(Mandatory = $true)][string]$VmSize,
+        [int]$VCpus = 2,
+        [double]$MinMemoryGB = 8,
+        [int]$Maximum = 5
+    )
+
+    $listArgs = @('vm', 'list-skus', '--location', $Location, '--resource-type', 'virtualMachines', '--all')
+    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) { $listArgs += @('--subscription', $SubscriptionId) }
+    $all = Invoke-AzJson -Arguments $listArgs -AllowFailure
+    if ($null -eq $all -or ($all -is [hashtable] -and $all.failed)) { return @() }
+
+    $candidates = foreach ($candidate in @($all)) {
+        if ($candidate.name -eq $VmSize -or $candidate.name -notmatch '^Standard_[DBE]\d') { continue }
+        if ($candidate.PSObject.Properties['restrictions'] -and @($candidate.restrictions).Count -gt 0) { continue }
+        $capabilities = @{}
+        if ($candidate.PSObject.Properties['capabilities']) {
+            foreach ($capability in @($candidate.capabilities)) { $capabilities[$capability.name] = "$($capability.value)" }
+        }
+        if ($capabilities['vCPUs'] -ne "$VCpus") { continue }
+        if ($capabilities.ContainsKey('CpuArchitectureType') -and $capabilities['CpuArchitectureType'] -ne 'x64') { continue }
+        if ($capabilities.ContainsKey('DiskControllerTypes') -and $capabilities['DiskControllerTypes'] -notmatch 'SCSI') { continue }
+        if ($capabilities['PremiumIO'] -ne 'True') { continue }
+        $memory = [double]($capabilities['MemoryGB'] ?? 0)
+        if ($memory -lt $MinMemoryGB) { continue }
+        # General-purpose D first (burstable B can throttle the jumpbox bootstrap).
+        [pscustomobject]@{ Name = $candidate.name; Rank = $(if ($candidate.name -match '^Standard_D') { 0 } else { 1 }); MemoryGB = $memory }
+    }
+    return @($candidates | Sort-Object Rank, MemoryGB, Name -Unique | Select-Object -First $Maximum -ExpandProperty Name)
+}
+
+function Get-VmSizeHint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Location,
+        [Parameter(Mandatory = $true)][string]$VmSize,
+        [int]$VCpus = 2,
+        [double]$MinMemoryGB = 8
+    )
+
+    $alternatives = @(Get-VmSizeAlternatives -Location $Location -VmSize $VmSize -VCpus $VCpus -MinMemoryGB $MinMemoryGB)
+    if ($alternatives.Count -eq 0) { return " Choose another size with 'azd env set VM_SIZE <size>'." }
+    return " Available $VCpus-vCPU alternatives: $($alternatives -join ', '). Run: azd env set VM_SIZE $($alternatives[0])"
+}
+
 function Test-ComputeQuota {
     param(
         [Parameter(Mandatory = $true)][string]$Location,
@@ -382,11 +431,16 @@ function Test-ComputeQuota {
 
     $sku = @($skuResult | Where-Object { $_.name -eq $VmSize } | Select-Object -First 1)
     if ($sku.Count -eq 0) {
-        Write-PreflightCheck -Status FAIL -Name 'quota:compute:vm-sku' -Message "$VmSize is not available in $Location."
+        Write-PreflightCheck -Status FAIL -Name 'quota:compute:vm-sku' -Message ("$VmSize is not available in $Location." + (Get-VmSizeHint -Location $Location -VmSize $VmSize))
         return
     }
     if (@($sku[0].restrictions).Count -gt 0) {
-        Write-PreflightCheck -Status FAIL -Name 'quota:compute:vm-sku' -Message "$VmSize has restrictions in $Location."
+        $restrictedCapabilities = @($sku[0].capabilities)
+        $restrictedVcpus = @($restrictedCapabilities | Where-Object { $_.name -eq 'vCPUs' } | Select-Object -First 1)
+        $restrictedMemory = @($restrictedCapabilities | Where-Object { $_.name -eq 'MemoryGB' } | Select-Object -First 1)
+        $hintVcpus = if ($restrictedVcpus.Count -gt 0) { [int]$restrictedVcpus[0].value } else { 2 }
+        $hintMemory = if ($restrictedMemory.Count -gt 0) { [double]$restrictedMemory[0].value } else { 8 }
+        Write-PreflightCheck -Status FAIL -Name 'quota:compute:vm-sku' -Message ("$VmSize has restrictions in $Location." + (Get-VmSizeHint -Location $Location -VmSize $VmSize -VCpus $hintVcpus -MinMemoryGB $hintMemory))
         return
     }
 
