@@ -62,7 +62,7 @@ jobs:
           uvx --from "git+https://github.com/github/spec-kit.git@$SPECKIT_COMMIT" \
             specify integration upgrade copilot --script ps --integration-options="--skills"
           python -c 'import json, os; version = json.load(open(".specify/integration.json"))["version"]; assert "v" + version == os.environ["SPECKIT_TAG"], "Installed Spec Kit version does not match the resolved release"'
-          git diff --exit-code -- .specify/memory .github/agents .github/copilot-instructions.md
+          git diff --exit-code -- .specify/memory .github/copilot-instructions.md
           uv run --no-project --with pytest python -m pytest tests/test_speckit_installation.py --quiet
 
       - name: Open or update review pull request
@@ -82,7 +82,7 @@ jobs:
 
             - Release: https://github.com/github/spec-kit/releases/tag/${{ steps.release.outputs.tag }}
             - Source commit: `${{ steps.release.outputs.commit }}`
-            - Preserves the repository constitution and custom agent instructions.
+            - Preserves the repository constitution and Copilot instructions.
             - Verifies generated file hashes and consistent installation metadata.
             - No application, Bicep, Terraform, or azd lifecycle changes.
 

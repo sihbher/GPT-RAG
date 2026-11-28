@@ -148,7 +148,6 @@ def main() -> int:
     skill_names: set[str] = set()
 
     groups = (
-        (ROOT / ".github" / "agents", "*.agent.md", "agent"),
         (ROOT / ".github" / "skills", "*/SKILL.md", "skill"),
         (ROOT / ".github" / "instructions", "*.instructions.md", "instruction"),
     )
