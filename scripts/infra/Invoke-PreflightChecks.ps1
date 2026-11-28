@@ -1510,6 +1510,7 @@ function Get-RequiredResourceProviders {
         'Microsoft.Bing'                 = 'Bing grounding'
         'Microsoft.PowerPlatform'        = 'Power Platform subnet delegation'
         'Microsoft.Web'                  = 'AI Gateway outbound integration subnet delegation'
+        'Microsoft.DurableTask'          = 'Durable Task Scheduler (container_apps orchestration host)'
     }
 
     # Always-required providers used implicitly at deploy time (LA workspace
@@ -1593,6 +1594,7 @@ function Get-RequiredResourceProviders {
         'Microsoft.DocumentDB'           = ($deployCosmos -or $deployAiFoundry)
         'Microsoft.Bing'                 = $deployBing
         'Microsoft.DBforPostgreSQL'       = (Resolve-DeployFlag -P $P -Key 'deployPostgreSql' -Default $false)
+        'Microsoft.DurableTask'          = (Resolve-DeployFlag -P $P -Key 'deployDurableTaskScheduler' -Default $false)
     }
 
     $subnetProviders = @(Get-SubnetSelection -P $P | Where-Object { $_.Managed -and $_.Delegation } |

@@ -1143,6 +1143,21 @@ try {
         $delegated = @(Get-RequiredResourceProviders -P $case | Where-Object { $_.Namespace -in 'Microsoft.PowerPlatform', 'Microsoft.Web' })
         Assert-True 'No delegation-only provider prerequisites for unselected subnet writes' ($delegated.Count -eq 0)
     }
+    # The container_apps host deploys Microsoft.DurableTask/schedulers;
+    # an unregistered provider must block preflight instead of a late ARM failure.
+    Write-Host 'Durable Task Scheduler provider follows its deployment flag' -ForegroundColor Cyan
+    $durableOn = @(Get-RequiredResourceProviders -P @{ deployDurableTaskScheduler = $true } | Where-Object Namespace -eq 'Microsoft.DurableTask')
+    Assert-True 'Microsoft.DurableTask is a selected prerequisite when the scheduler is deployed' ($durableOn.Count -eq 1 -and $durableOn[0].Selected)
+    $durableOff = @(Get-RequiredResourceProviders -P @{ deployDurableTaskScheduler = $false } | Where-Object Namespace -eq 'Microsoft.DurableTask')
+    Assert-True 'Microsoft.DurableTask stays optional when the scheduler is not deployed' ($durableOff.Count -eq 1 -and -not $durableOff[0].Selected)
+    $script:MissingProvider = ''
+    $script:ProviderState = 'NotRegistered'
+    Reset-Findings
+    Test-ResourceProviders -P @{ deployDurableTaskScheduler = $true }
+    Assert-True 'Unregistered Durable Task provider fails preflight when selected' (
+        @($script:Findings | Where-Object { $_.Severity -eq 'FAIL' -and $_.Code -eq 'RP_NOT_REGISTERED' -and $_.Message -match 'Microsoft\.DurableTask' }).Count -eq 1
+    )
+    $script:ProviderState = 'Registered'
     Assert-True 'Mock Azure boundary performed no mutation commands' (@($script:AzCalls | Where-Object { ($_ -join ' ') -match '\b(create|update|delete|register|set)\b' }).Count -eq 0)
 } finally {
     ${function:Invoke-AzCli} = $originalAzCli
