@@ -452,3 +452,50 @@ def test_real_native_hook_block_calls_shared_lifecycle_and_fails_closed(tmp_path
     assert (result.returncode != 0) is failure
     assert "config.deployment.native_deploy" in result.stdout
     assert ("config.deployment.appconfig" in result.stdout) is not failure
+
+
+INGEST_PRINCIPAL = "44444444-4444-4444-8444-444444444444"
+
+
+def _container_apps_mapping(*services):
+    principals = {
+        "frontend": "11111111-aaaa-4111-8111-111111111111",
+        "orchestrator": "22222222-aaaa-4222-8222-222222222222",
+        "dataingest": INGEST_PRINCIPAL,
+    }
+    return json.dumps([
+        {"service_name": name, "identity": {"principalId": principals[name]}} for name in services
+    ])
+
+
+def _granted(host, ingestion, services):
+    env = {
+        **environment(host),
+        "DEPLOY_INGESTION_CONTAINER_APP": str(ingestion).lower(),
+        "CONTAINER_APPS": _container_apps_mapping(*services),
+    }
+    names = lambda _env, keys, **_: tuple(key.replace("_", "-") for key in keys if key == "AUDIT_HMAC_KEY")
+    with patch.object(native_access, "secret_names", side_effect=names), \
+         patch.object(native_access, "tool_secret_names", return_value=()), \
+         patch.object(native_access, "grant_secrets") as grant:
+        native_access.grant_container_features(env)
+    return {call.args[1]: tuple(call.args[2]) for call in grant.call_args_list}
+
+
+@pytest.mark.parametrize("host", ["container_apps", "hosted"])
+def test_selected_ingestion_reads_only_the_audit_hmac_reference(host):
+    # Ingestion loads the agent-lz label with Key Vault resolution, so it must be able to
+    # read the AUDIT_HMAC_KEY reference or it fails to start with getSecret 403.
+    services = ("frontend", "orchestrator", "dataingest") if host == "container_apps" else ("frontend", "dataingest")
+    granted = _granted(host, True, services)
+    assert granted[INGEST_PRINCIPAL] == ("AUDIT-HMAC-KEY",)
+
+
+def test_unselected_ingestion_receives_no_secret_grant():
+    granted = _granted("container_apps", False, ("frontend", "orchestrator"))
+    assert INGEST_PRINCIPAL not in granted
+
+
+def test_selected_ingestion_requires_its_verified_identity():
+    with pytest.raises(ValueError, match="verified app identity"):
+        _granted("container_apps", True, ("frontend", "orchestrator"))

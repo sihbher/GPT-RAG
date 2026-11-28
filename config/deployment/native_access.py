@@ -107,6 +107,11 @@ def grant_container_features(environment: Mapping[str, str]) -> None:
         "CHAINLIT_AUTH_SECRET", "OAUTH_AZURE_AD_CLIENT_SECRET", "authClientSecret",
     )))
     from config.deployment.native import resolve_application
-    if resolve_application(environment).host == "container_apps":
+    application = resolve_application(environment)
+    if application.host == "container_apps":
         worker = principal("orchestrator")
         grant_runtime_features(environment, worker)
+    if application.ingestion:
+        # Ingestion loads the agent-lz label with Key Vault resolution, so it must
+        # read the AUDIT_HMAC_KEY reference to start; grant only that secret.
+        grant_secrets(environment, principal("dataingest"), secret_names(environment, ("AUDIT_HMAC_KEY",)))
