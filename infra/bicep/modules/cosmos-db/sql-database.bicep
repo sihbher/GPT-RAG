@@ -35,21 +35,20 @@ resource sqlContainers 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
     name: container.name
     parent: sqlDatabase
     properties: {
-      resource: {
+      // The Cosmos DB RP rejects an explicit null vectorEmbeddingPolicy; send it
+      // only when the container defines one (same as the Terraform provider).
+      resource: union({
         conflictResolutionPolicy: {}
         defaultTtl: container.?defaultTtl ?? -1
         id: container.name
         indexingPolicy: empty(container.?indexingPolicy ?? {}) ? null : container.indexingPolicy
-        vectorEmbeddingPolicy: container.?vectorEmbeddingPolicy
         partitionKey: {
-          paths: [
-            for path in container.paths: startsWith(path, '/') ? path : '/${path}'
-          ]
+          paths: map(container.paths, path => startsWith(path, '/') ? path : '/${path}')
           kind: 'Hash'
           version: 1
         }
         uniqueKeyPolicy: null
-      }
+      }, empty(container.?vectorEmbeddingPolicy ?? {}) ? {} : { vectorEmbeddingPolicy: container.vectorEmbeddingPolicy })
       options: contains(databaseAccount.properties.capabilities, { name: 'EnableServerless' })
         ? null
         : {

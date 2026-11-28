@@ -170,14 +170,15 @@ try {
         -Message 'Database throughput remains disabled for serverless and parameter-driven otherwise'
 
     $containerResource = $sqlContainers.properties.resource
-    $partitionKeyJson = $containerResource.partitionKey | ConvertTo-Json -Depth 20 -Compress
+    # The resource is one union() expression so a null vectorEmbeddingPolicy is never sent.
+    $containerJson = if ($containerResource -is [string]) { $containerResource } else { $containerResource | ConvertTo-Json -Depth 20 -Compress }
     Assert-True `
         -Condition (
-            [string]$containerResource.defaultTtl -match 'defaultTtl.*-1' -and
-            [string]$containerResource.indexingPolicy -match 'indexingPolicy' -and
-            $partitionKeyJson.Contains("startsWith(parameters('containers')") -and
-            $partitionKeyJson.Contains('"kind":"Hash"') -and
-            $partitionKeyJson.Contains('"version":1')
+            $containerJson.Contains("'defaultTtl', coalesce(tryGet(parameters('containers')[copyIndex()], 'defaultTtl'), -1)") -and
+            $containerJson.Contains("'indexingPolicy', if(empty(coalesce(tryGet(parameters('containers')[copyIndex()], 'indexingPolicy')") -and
+            $containerJson.Contains("map(parameters('containers')[copyIndex()].paths, lambda('path', if(startsWith(lambdaVariables('path'), '/')") -and
+            $containerJson.Contains("'kind', 'Hash'") -and
+            $containerJson.Contains("'version', 1")
         ) `
         -Message 'Container TTL, indexing, and partition-key semantics remain intact'
 

@@ -1,0 +1,24 @@
+{
+    "description": "Cosmos SQL containers send vectorEmbeddingPolicy only when defined. Exact compiled before/after of the container resource property.",
+    "path": "/resources/cosmosSqlDatabase/properties/template/resources/sqlContainers/properties/resource",
+    "before": {
+        "conflictResolutionPolicy": {},
+        "defaultTtl": "[coalesce(tryGet(parameters('containers')[copyIndex()], 'defaultTtl'), -1)]",
+        "id": "[parameters('containers')[copyIndex()].name]",
+        "indexingPolicy": "[if(empty(coalesce(tryGet(parameters('containers')[copyIndex()], 'indexingPolicy'), createObject())), null(), parameters('containers')[copyIndex()].indexingPolicy)]",
+        "vectorEmbeddingPolicy": "[tryGet(parameters('containers')[copyIndex()], 'vectorEmbeddingPolicy')]",
+        "partitionKey": {
+            "copy": [
+                {
+                    "name": "paths",
+                    "count": "[length(parameters('containers')[copyIndex()].paths)]",
+                    "input": "[if(startsWith(parameters('containers')[copyIndex()].paths[copyIndex('paths')], '/'), parameters('containers')[copyIndex()].paths[copyIndex('paths')], format('/{0}', parameters('containers')[copyIndex()].paths[copyIndex('paths')]))]"
+                }
+            ],
+            "kind": "Hash",
+            "version": 1
+        },
+        "uniqueKeyPolicy": null
+    },
+    "after": "[union(createObject('conflictResolutionPolicy', createObject(), 'defaultTtl', coalesce(tryGet(parameters('containers')[copyIndex()], 'defaultTtl'), -1), 'id', parameters('containers')[copyIndex()].name, 'indexingPolicy', if(empty(coalesce(tryGet(parameters('containers')[copyIndex()], 'indexingPolicy'), createObject())), null(), parameters('containers')[copyIndex()].indexingPolicy), 'partitionKey', createObject('paths', map(parameters('containers')[copyIndex()].paths, lambda('path', if(startsWith(lambdaVariables('path'), '/'), lambdaVariables('path'), format('/{0}', lambdaVariables('path'))))), 'kind', 'Hash', 'version', 1), 'uniqueKeyPolicy', null()), if(empty(coalesce(tryGet(parameters('containers')[copyIndex()], 'vectorEmbeddingPolicy'), createObject())), createObject(), createObject('vectorEmbeddingPolicy', parameters('containers')[copyIndex()].vectorEmbeddingPolicy)))]"
+}
