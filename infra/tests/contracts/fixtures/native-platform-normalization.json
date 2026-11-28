@@ -205,10 +205,7 @@
                       "location": "[parameters('location')]",
                       "tags": "[parameters('tags')]",
                       "properties": {
-                        "sku": {
-                          "name": "[parameters('sku')]",
-                          "capacity": "[parameters('capacity')]"
-                        },
+                        "sku": "[if(equals(parameters('sku'), 'Consumption'), createObject('name', parameters('sku')), createObject('name', parameters('sku'), 'capacity', parameters('capacity')))]",
                         "ipAllowlist": [],
                         "publicNetworkAccess": "[if(parameters('networkIsolation'), 'Disabled', 'Enabled')]"
                       }

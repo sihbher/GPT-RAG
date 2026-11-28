@@ -16,7 +16,8 @@ resource scheduler 'Microsoft.DurableTask/schedulers@2026-02-01' = {
   location: location
   tags: tags
   properties: {
-    sku: { name: sku, capacity: capacity }
+    // Consumption rejects any capacity; only Dedicated is billed by capacity units.
+    sku: sku == 'Consumption' ? { name: sku } : { name: sku, capacity: capacity }
     ipAllowlist: []
     publicNetworkAccess: networkIsolation ? 'Disabled' : 'Enabled'
   }

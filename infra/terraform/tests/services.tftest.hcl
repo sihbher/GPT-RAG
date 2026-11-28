@@ -987,3 +987,39 @@ run "trace_evaluation_and_protected_abac_cross_subscription_byo_parity" {
     error_message = "Opt-in trace evaluation and protected AppGenAIContent ABAC grants must honor foreign BYO observability subscriptions and exact v2.0 table predicates."
   }
 }
+
+# Regression: Microsoft.DurableTask rejects capacity on Consumption
+# ("InvalidSKUConfig - Consumption SKU should not have a capacity").
+run "durable_task_consumption_omits_capacity" {
+  command = plan
+
+  variables {
+    deployDurableTaskScheduler = true
+  }
+
+  assert {
+    condition = (
+      azapi_resource.durable_scheduler[0].body.properties.sku.name == "Consumption" &&
+      !contains(keys(azapi_resource.durable_scheduler[0].body.properties.sku), "capacity")
+    )
+    error_message = "Consumption Durable Task Scheduler must not send sku.capacity."
+  }
+}
+
+run "durable_task_dedicated_keeps_capacity" {
+  command = plan
+
+  variables {
+    deployDurableTaskScheduler   = true
+    durableTaskSchedulerSku      = "Dedicated"
+    durableTaskSchedulerCapacity = 2
+  }
+
+  assert {
+    condition = (
+      azapi_resource.durable_scheduler[0].body.properties.sku.name == "Dedicated" &&
+      azapi_resource.durable_scheduler[0].body.properties.sku.capacity == 2
+    )
+    error_message = "Dedicated Durable Task Scheduler must send the configured sku.capacity."
+  }
+}

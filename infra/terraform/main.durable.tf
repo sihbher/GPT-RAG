@@ -9,7 +9,11 @@ resource "azapi_resource" "durable_scheduler" {
   tags      = local.deployment_context.tags
   body = {
     properties = {
-      sku                 = { name = var.durableTaskSchedulerSku, capacity = var.durableTaskSchedulerCapacity }
+      # Consumption rejects any capacity; only Dedicated is billed by capacity units.
+      sku = merge(
+        { name = var.durableTaskSchedulerSku },
+        var.durableTaskSchedulerSku == "Dedicated" ? { capacity = var.durableTaskSchedulerCapacity } : {}
+      )
       ipAllowlist         = []
       publicNetworkAccess = var.networkIsolation ? "Disabled" : "Enabled"
     }
