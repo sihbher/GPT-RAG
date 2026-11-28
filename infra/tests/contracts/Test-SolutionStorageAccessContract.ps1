@@ -204,7 +204,15 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
     else { $originalDependencies }
     Assert-Equal 'resources.acrTaskAgentPool.dependsOn: only the exact original list or the single #159 virtualNetworkSubnets edge is permitted.' $acr.dependsOn $acceptedDependencies
     $acr.dependsOn = $originalDependencies
-    $subnets = $Template.resources.virtualNetworkSubnets | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+    $cosmos = $Template.resources.cosmosDBAccount | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+    $originalCosmosDependencies = @('cosmosUAI', 'virtualNetwork')
+    $acceptedCosmosDependencies = if (@($cosmos.dependsOn).Count -eq 3) {
+        @('cosmosUAI', 'virtualNetwork', 'virtualNetworkSubnets')
+    }
+    else { $originalCosmosDependencies }
+    Assert-Equal 'resources.cosmosDBAccount.dependsOn: only the exact original list or the single reused-VNet virtualNetworkSubnets edge is permitted.' $cosmos.dependsOn $acceptedCosmosDependencies
+    $cosmos.dependsOn = $originalCosmosDependencies
+    $subnets =  $Template.resources.virtualNetworkSubnets | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
     $originalNsgExclusions = @('AzureFirewallSubnet', 'AppGatewaySubnet')
     $acceptedNsgExclusions = if (@($subnets.properties.template.variables.invalidNsgSubnets).Count -eq 3) {
         @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet')
@@ -217,6 +225,7 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
     foreach ($name in $resourceHashes.Keys) {
         $resource = if ($name -ceq 'storageAccount') { $OriginalSolution }
         elseif ($name -ceq 'acrTaskAgentPool') { $acr }
+        elseif ($name -ceq 'cosmosDBAccount') { $cosmos }
         elseif ($name -ceq 'virtualNetworkSubnets') { $subnets }
         else { $Template.resources[$name] }
         if ((Get-ContractHash $resource) -cne $resourceHashes[$name]) { $changed.Add("resources.$name") }

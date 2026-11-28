@@ -3422,9 +3422,13 @@ module cosmosDBAccount 'modules/cosmos-db/database-account.bicep' = if (deployCo
     virtualNetworkSubnetIds: _networkIsolation ? union([_peSubnetId, _caEnvSubnetId], [_applicationPeSubnetId]) : []
     tags: _tags
   }
+  // The account registers its virtual network rules with the VNet; NRP rejects
+  // that while any of the subnets is still being written (SubnetsNotProvisioned).
   dependsOn: [
     #disable-next-line BCP321
     (_networkIsolation) ? virtualNetwork : null
+    #disable-next-line BCP321
+    (_networkIsolation && useExistingVNet) ? virtualNetworkSubnets : null
   ]
 }
 
