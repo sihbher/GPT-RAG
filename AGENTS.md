@@ -72,11 +72,10 @@ version tables into agent instructions because they become stale.
 - `docs/adr/`: architectural decisions for this platform repository.
 - `.github/copilot-instructions.md`: branching, versioning, release, changelog,
   and documentation rules.
-- `.github/agents/`: active GitHub Copilot engineering roles.
 - `.github/skills/`: reusable engineering procedures loaded when relevant.
 - `.github/instructions/`: path-specific implementation rules.
 
-The engineering agents and skills in `.github/` help evolve and operate the
+The engineering skills and instructions in `.github/` help evolve and operate the
 Agent Landing Zone repositories. They are not definitions of agents executed by the
 Agent Landing Zone product.
 

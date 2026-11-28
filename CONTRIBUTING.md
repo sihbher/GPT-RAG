@@ -24,7 +24,7 @@ It upgrades from the release's resolved commit and opens or updates
 `feature/update-speckit` against `develop`. It does not merge automatically.
 Scheduled execution starts only after the workflow reaches the default branch.
 
-Updates preserve the repository constitution, custom agents, and instructions.
+Updates preserve the repository constitution and instructions.
 Locally modified managed skills cause the upgrade to fail rather than being
 overwritten. LF line endings keep upstream file hashes valid on Windows and Linux.
 The installation regression tests verify managed assets and version metadata.
